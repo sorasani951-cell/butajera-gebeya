@@ -9,12 +9,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script>
-        // ቡኒ (Brown) ብራንድ ቀለማት
         tailwind.config = {
             theme: {
-                extend: {
-                    colors: { brown: { 50: '#fdf8f6', 100: '#f2e8e5', 500: '#a0522d', 600: '#8b4513', 900: '#4a2511' } }
-                }
+                extend: { colors: { brown: { 50: '#fdf8f6', 100: '#f2e8e5', 500: '#a0522d', 600: '#8b4513', 900: '#4a2511' } } }
             }
         }
     </script>
@@ -36,7 +33,6 @@
         </div>
     </header>
 
-    <!-- Main Content -->
     <main id="mainContent" class="p-4"></main>
 
     <!-- Bottom Navigation -->
@@ -52,8 +48,6 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        // 🚨 አዲስ: Firebase Storage ለፎቶ አፕሎድ
-        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBB3sL15IZxIGDW_aKVyiKsUMSaDrbtUfc",
@@ -66,7 +60,6 @@
         };
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
-        const storage = getStorage(app); // Storage ማነቂያ
         const tg = window.Telegram.WebApp;
         tg.expand();
 
@@ -80,6 +73,7 @@
 
         let productsCache = [];
         let favorites = JSON.parse(localStorage.getItem('butajera_favs') || '[]');
+        window.currentCat = 'ሁሉንም';
 
         window.switchTab = (tabName) => {
             document.querySelectorAll('nav button').forEach(btn => btn.className = 'flex flex-col items-center w-1/5 text-gray-500');
@@ -107,15 +101,16 @@
             if(index > -1) favorites.splice(index, 1);
             else favorites.push(id);
             localStorage.setItem('butajera_favs', JSON.stringify(favorites));
-            switchTab('shop'); 
+            
+            // ሪፍሬሽ ሲያደርግ ያለበት ገፅ ላይ እንዲቆይ
+            const currentActive = document.querySelector('nav button.text-brown-600').id.replace('tab-', '');
+            switchTab(currentActive); 
         };
 
-        // 🚨 አዲስ: Multi-Image Popup Modal
         window.openProductModal = (id) => {
             const p = productsCache.find(x => x.id === id);
             if(!p) return;
             
-            // ፎቶዎችን ወደ ጎን መሳቢያ (Slider) ማዘጋጀት
             let imagesHtml = '';
             if(p.images && p.images.length > 0) {
                 imagesHtml = p.images.map(img => `<img src="${img}" class="min-w-full h-64 object-cover rounded-xl snap-center">`).join('');
@@ -136,6 +131,7 @@
                     ${(p.images && p.images.length > 1) ? `<p class="text-center text-[10px] text-gray-400 mb-3"><i class="fas fa-arrows-alt-h"></i> ተጨማሪ ፎቶ ለማየት ወደ ጎን ይስቡ</p>` : '<div class="mb-3"></div>'}
                     
                     <div class="overflow-y-auto flex-grow pb-20 no-scrollbar">
+                        <span class="inline-block bg-brown-100 text-brown-800 text-[10px] font-bold px-2 py-1 rounded-full mb-2">${p.category || 'ሌሎች'}</span>
                         <h2 class="text-xl font-bold text-gray-800 mb-1">${p.name}</h2>
                         <p class="text-brown-600 font-bold text-lg mb-4">${p.price} ብር</p>
                         <h3 class="font-bold text-gray-700 mb-1 text-sm border-b pb-1">መግለጫ</h3>
@@ -168,13 +164,13 @@
 
         function getProductCard(p) {
             const isFav = favorites.includes(p.id);
-            // የድሮ ዳታ image የሚል ስላለው፣ አዲሱ ደግሞ images የሚል array ስላለው ሁለቱንም እንዲቀበል
             const coverImage = (p.images && p.images.length > 0) ? p.images[0] : (p.image || 'https://via.placeholder.com/300');
             
             return `
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col relative overflow-hidden">
                 <div class="relative w-full h-36">
                     <img src="${coverImage}" class="w-full h-full object-cover" onclick="openProductModal('${p.id}')">
+                    <span class="absolute top-2 left-2 bg-black/60 text-white text-[9px] px-2 py-1 rounded-full">${p.category || 'ሌሎች'}</span>
                     ${(p.images && p.images.length > 1) ? `<span class="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full"><i class="far fa-images"></i> ${p.images.length}</span>` : ''}
                 </div>
                 <button onclick="toggleFavorite('${p.id}')" class="absolute top-2 right-2 bg-white/90 p-2 rounded-full shadow-sm ${isFav ? 'text-red-500' : 'text-gray-400'}">
@@ -215,25 +211,52 @@
             `;
         }
 
+        window.filterCat = (cat) => {
+            window.currentCat = cat;
+            document.querySelectorAll('.cat-btn').forEach(b => {
+                b.className = b.innerText.includes(cat) || (cat === 'ሁሉንም' && b.innerText === 'ሁሉንም')
+                    ? 'cat-btn bg-brown-600 text-white px-4 py-1.5 rounded-full text-[11px] whitespace-nowrap shadow-sm'
+                    : 'cat-btn bg-white text-gray-600 border border-gray-200 px-4 py-1.5 rounded-full text-[11px] whitespace-nowrap shadow-sm';
+            });
+            document.getElementById('searchInput').dispatchEvent(new Event('input'));
+        }
+
         async function renderShop(main) {
             main.innerHTML = `<div class="text-center mt-10"><i class="fas fa-spinner fa-spin text-3xl text-brown-600"></i></div>`;
             const prods = await fetchProducts();
             const allItems = prods.map(getProductCard).join('');
+            
+            // ካተጎሪዎችን ማሳያ Chips
+            const categories = ['ሁሉንም', 'ኤሌክትሮኒክስ', 'አልባሳት', 'ጫማዎች', 'የቤት እቃዎች', 'መዋቢያዎች', 'ሌሎች'];
+            const catHtml = categories.map(c => 
+                `<button onclick="filterCat('${c}')" class="cat-btn ${c === window.currentCat ? 'bg-brown-600 text-white' : 'bg-white text-gray-600 border border-gray-200'} px-4 py-1.5 rounded-full text-[11px] whitespace-nowrap shadow-sm">${c}</button>`
+            ).join('');
+
             main.innerHTML = `
-                <div class="relative mb-4">
+                <div class="relative mb-3">
                     <input type="text" id="searchInput" placeholder="እቃ ይፈልጉ..." class="w-full bg-white border border-gray-200 rounded-xl py-3 px-4 pl-10 focus:ring-2 focus:ring-brown-500 outline-none">
                     <i class="fas fa-search absolute left-4 top-3.5 text-gray-400"></i>
                 </div>
+                <div class="flex overflow-x-auto no-scrollbar gap-2 mb-4 pb-1">
+                    ${catHtml}
+                </div>
                 <div class="grid grid-cols-2 gap-3" id="shopGrid">${allItems || '<p class="col-span-2 text-center text-gray-500">ሱቁ ባዶ ነው</p>'}</div>
             `;
+
             document.getElementById('searchInput').addEventListener('input', (e) => {
                 const term = e.target.value.toLowerCase();
-                const filtered = prods.filter(p => p.name.toLowerCase().includes(term));
-                document.getElementById('shopGrid').innerHTML = filtered.map(getProductCard).join('') || '<p class="col-span-2 text-center text-gray-500">የተፈለገው እቃ አልተገኘም</p>';
+                const filtered = prods.filter(p => {
+                    const matchName = p.name.toLowerCase().includes(term);
+                    const matchCat = window.currentCat === 'ሁሉንም' ? true : (p.category === window.currentCat);
+                    return matchName && matchCat;
+                });
+                document.getElementById('shopGrid').innerHTML = filtered.map(getProductCard).join('') || '<p class="col-span-2 text-center py-6 text-gray-500">የተፈለገው እቃ አልተገኘም</p>';
             });
+            
+            // የነበረበትን Category ማጣሪያ እንዲተገብር
+            document.getElementById('searchInput').dispatchEvent(new Event('input'));
         }
 
-        // 🚨 አዲስ: Sell Form with Direct Image Upload
         function renderSell(main) {
             main.innerHTML = `
                 <h2 class="text-xl font-bold text-brown-900 mb-4"><i class="fas fa-plus-circle mr-2"></i>አዲስ እቃ አስገባ</h2>
@@ -241,12 +264,24 @@
                     <div><label class="text-xs text-gray-500">የእቃው ስም</label><input type="text" id="sName" class="w-full border rounded-lg p-3 bg-gray-50"></div>
                     <div><label class="text-xs text-gray-500">ዋጋ (በብር)</label><input type="number" id="sPrice" class="w-full border rounded-lg p-3 bg-gray-50"></div>
                     
+                    <!-- አዲሱ የ Category መምረጫ -->
+                    <div>
+                        <label class="text-xs text-gray-500">ምድብ (Category)</label>
+                        <select id="sCat" class="w-full border rounded-lg p-3 bg-gray-50 text-gray-700 outline-none">
+                            <option value="ኤሌክትሮኒክስ">💻 ኤሌክትሮኒክስ</option>
+                            <option value="አልባሳት">👕 አልባሳት</option>
+                            <option value="ጫማዎች">👟 ጫማዎች</option>
+                            <option value="የቤት እቃዎች">🛏️ የቤት እቃዎች</option>
+                            <option value="መዋቢያዎች">💄 መዋቢያዎች</option>
+                            <option value="ሌሎች">📦 ሌሎች</option>
+                        </select>
+                    </div>
+
                     <div>
                         <label class="text-xs text-gray-500">ፎቶዎች (እስከ 4 ፎቶ)</label>
                         <input type="file" id="sImages" multiple accept="image/*" class="w-full border rounded-lg p-2 bg-gray-50 text-sm">
                         <p class="text-[10px] text-gray-400 mt-1">የመጀመሪያው ፎቶ ሽፋን (Cover) ይሆናል</p>
                     </div>
-
                     <div><label class="text-xs text-gray-500">መግለጫ</label><textarea id="sDesc" class="w-full border rounded-lg p-3 bg-gray-50 h-24"></textarea></div>
                     <button onclick="postItem()" class="w-full bg-brown-600 text-white font-bold py-3 rounded-lg"><i class="fas fa-upload mr-2"></i> ፖስት አድርግ</button>
                 </div>
@@ -256,12 +291,15 @@
         window.postItem = async () => {
             const name = document.getElementById('sName').value;
             const price = document.getElementById('sPrice').value;
+            const cat = document.getElementById('sCat').value; // ምድብ ማንበቢያ
             const files = document.getElementById('sImages').files;
             const desc = document.getElementById('sDesc').value;
 
+            const IMGBB_API_KEY = "00537984db6cf1347305abf5b9d892e8"; 
+
             if(!name || !price) return tg.showAlert("ስም እና ዋጋ ማስገባት ግዴታ ነው!");
             if(files.length === 0) return tg.showAlert("እባክዎ ቢያንስ 1 ፎቶ ያስገቡ!");
-            if(files.length > 4) return tg.showAlert("ከ 4 ፎቶ በላይ ማስገባት አይፈቀድም!");
+            if(files.length > 4) return tg.showAlert("ከ 4 ፎቶ በላይ አይፈቀድም!");
             
             tg.MainButton.text = "ፎቶዎች አፕሎድ እየተደረጉ ነው..."; 
             tg.MainButton.show();
@@ -269,13 +307,21 @@
 
             try {
                 let uploadedUrls = [];
-                // ፎቶዎቹን አንድ በአንድ Firebase Storage ላይ መጫን
                 for (let i = 0; i < files.length; i++) {
-                    const file = files[i];
-                    const storageRef = ref(storage, `butajera_products/${Date.now()}_${file.name}`);
-                    const snapshot = await uploadBytes(storageRef, file);
-                    const downloadUrl = await getDownloadURL(snapshot.ref);
-                    uploadedUrls.push(downloadUrl);
+                    let formData = new FormData();
+                    formData.append("image", files[i]);
+                    
+                    let response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    let data = await response.json();
+                    if(data.success) {
+                        uploadedUrls.push(data.data.url);
+                    } else {
+                        throw new Error("ImgBB Upload Failed");
+                    }
                 }
 
                 tg.MainButton.text = "ዳታቤዝ ላይ እየተመዘገበ ነው...";
@@ -283,7 +329,8 @@
                 await addDoc(collection(db, "products"), {
                     name, 
                     price: Number(price), 
-                    images: uploadedUrls, // Array of URLs
+                    category: cat, // ምድብ ዳታቤዝ ላይ መመዝገቢያ
+                    images: uploadedUrls,
                     description: desc,
                     sellerId: currentUser.id, 
                     likes: 0, 
@@ -297,7 +344,7 @@
             } catch(e) { 
                 console.error(e);
                 tg.MainButton.hide(); 
-                tg.showAlert("ስህተት ተፈጥሯል! Storage Rules true መሆኑን ያረጋግጡ።"); 
+                tg.showAlert("ስህተት ተፈጥሯል! ኢንተርኔትዎን ያረጋግጡ።"); 
             }
         };
 
