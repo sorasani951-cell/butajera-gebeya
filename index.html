@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="am">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ቡታጅራ ገበያ</title>
+    <!-- Telegram Web App እና Tailwind CSS -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen">
+
+    <div class="bg-white p-8 rounded-2xl shadow-lg text-center max-w-sm w-full mx-4">
+        <h1 class="text-3xl font-bold text-green-600 mb-2">ቡታጅራ ገበያ 🛒</h1>
+        <p class="text-gray-600 mb-6">እንኳን በደህና መጡ! ሲስተሙ አሁን በትክክል እየሰራ ነው።</p>
+        
+        <button id="testBtn" class="bg-blue-600 text-white font-bold py-3 px-8 rounded-full shadow hover:bg-blue-700 transition w-full">
+            ወደ ሱቅ ግባ
+        </button>
+    </div>
+
+    <!-- Firebase ማገናኛ -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // የአንተ ትክክለኛ የ Butajera Gebeya ማገናኛ
+        const firebaseConfig = {
+            apiKey: "AIzaSyBB3sL15IZxIGDW_aKVyiKsUMSaDrbtUfc",
+            authDomain: "butajera-gebeya.firebaseapp.com",
+            projectId: "butajera-gebeya",
+            storageBucket: "butajera-gebeya.firebasestorage.app",
+            messagingSenderId: "392404782992",
+            appId: "1:392404782992:web:2b53ba913cba52ccc72d15",
+            measurementId: "G-BN3VWE40K5"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // የቴሌግራም ሲስተም
+        const tg = window.Telegram.WebApp;
+        tg.expand(); // ስክሪኑን ሙሉ እንዲያደርገው
+
+        document.getElementById('testBtn').addEventListener('click', () => {
+            tg.showAlert("እንኳን ወደ ቡታጅራ ገበያ በደህና መጡ! ዳታቤዙ በተሳካ ሁኔታ ተገናኝቷል።");
+        });
+    </script>
+</body>
+</html>
+
