@@ -47,7 +47,7 @@
     <!-- Firebase Scripts -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, query, orderBy, doc, updateDoc, increment, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBB3sL15IZxIGDW_aKVyiKsUMSaDrbtUfc",
@@ -66,14 +66,28 @@
         const ADMIN_IDS = [8356035160, 7419922678];
         const BOT_USERNAME = "butajera_gebeyabot";
 
-        const currentUser = tg.initDataUnsafe?.user || { id: 0, first_name: "እንግዳ" };
+        const currentUser = tg.initDataUnsafe?.user || { id: Date.now(), first_name: "እንግዳ" };
         const isAdmin = ADMIN_IDS.includes(currentUser.id);
         document.getElementById('userName').textContent = currentUser.first_name;
         if(isAdmin) document.getElementById('adminBadge').classList.remove('hidden');
 
+        // ተጠቃሚዎችን መመዝገብ (ለ user count)
+        setDoc(doc(db, "users", currentUser.id.toString()), {
+            name: currentUser.first_name,
+            lastSeen: new Date()
+        }, { merge: true });
+
         let productsCache = [];
+        let adminSettings = { phone: '', telegram: '' };
         let favorites = JSON.parse(localStorage.getItem('butajera_favs') || '[]');
         window.currentCat = 'ሁሉንም';
+
+        // አድሚን ሴቲንግ ማንበብ
+        async function loadAdminSettings() {
+            const snap = await getDoc(doc(db, 'settings', 'adminProfile'));
+            if(snap.exists()) adminSettings = snap.data();
+        }
+        loadAdminSettings();
 
         window.switchTab = (tabName) => {
             document.querySelectorAll('nav button').forEach(btn => btn.className = 'flex flex-col items-center w-1/5 text-gray-500');
@@ -96,21 +110,74 @@
             tg.openTelegramLink(shareUrl);
         };
 
-        window.toggleFavorite = (id) => {
+        // Like ማድረጊያ ሎጂክ
+        window.toggleFavorite = async (id, event) => {
+            if(event) event.stopPropagation();
             const index = favorites.indexOf(id);
-            if(index > -1) favorites.splice(index, 1);
-            else favorites.push(id);
-            localStorage.setItem('butajera_favs', JSON.stringify(favorites));
+            const pRef = doc(db, "products", id);
             
-            // ሪፍሬሽ ሲያደርግ ያለበት ገፅ ላይ እንዲቆይ
+            if(index > -1) {
+                favorites.splice(index, 1);
+                await updateDoc(pRef, { likes: increment(-1) }).catch(e=>console.log(e));
+            } else {
+                favorites.push(id);
+                await updateDoc(pRef, { likes: increment(1) }).catch(e=>console.log(e));
+            }
+            localStorage.setItem('butajera_favs', JSON.stringify(favorites));
+            productsCache = []; 
             const currentActive = document.querySelector('nav button.text-brown-600').id.replace('tab-', '');
             switchTab(currentActive); 
         };
 
-        window.openProductModal = (id) => {
+        // ትዕዛዝ መቀበያ (Order)
+        window.orderProduct = async (id, name, price) => {
+            const phone = prompt(`ለ "${name}" ትዕዛዝዎን ለማስገባት ስልክ ቁጥርዎን ይጻፉ:`);
+            if(phone && phone.trim() !== '') {
+                try {
+                    await addDoc(collection(db, "orders"), {
+                        productId: id, productName: name, price: price,
+                        customerName: currentUser.first_name, customerPhone: phone,
+                        customerId: currentUser.id, createdAt: new Date()
+                    });
+                    tg.showAlert("ትዕዛዝዎ በተሳካ ሁኔታ ተልኳል! በቅርቡ እንደውላለን።");
+                } catch(e) { tg.showAlert("ስህተት ተፈጥሯል ዳግም ይሞክሩ"); }
+            }
+        };
+
+        // Pin ማድረጊያ
+        window.togglePin = async (id, currentStatus) => {
+            await updateDoc(doc(db, "products", id), { isPinned: !currentStatus });
+            tg.showAlert(currentStatus ? "ከ Pin ተነስቷል" : "Pin ተደርጓል!");
+            productsCache = [];
+            document.getElementById('productModal').remove();
+            switchTab('home');
+        };
+
+        // 🚨 አዲስ: እቃ ማጥፊያ (Delete Product)
+        window.deleteProduct = async (id) => {
+            if(confirm("እርግጠኛ ነዎት ይህን እቃ ማጥፋት ይፈልጋሉ? (አንዴ ከጠፋ አይመለስም)")) {
+                try {
+                    await deleteDoc(doc(db, "products", id));
+                    tg.showAlert("እቃው በተሳካ ሁኔታ ተሰርዟል!");
+                    productsCache = []; // ሪፍሬሽ እንዲያደርግ
+                    document.getElementById('productModal').remove();
+                    
+                    const currentActive = document.querySelector('nav button.text-brown-600').id.replace('tab-', '');
+                    switchTab(currentActive);
+                } catch(e) {
+                    console.error(e);
+                    tg.showAlert("ስህተት ተፈጥሯል!");
+                }
+            }
+        };
+
+        window.openProductModal = async (id) => {
             const p = productsCache.find(x => x.id === id);
             if(!p) return;
             
+            // እይታ መጨመር (Views)
+            updateDoc(doc(db, "products", id), { views: increment(1) }).catch(e=>{});
+
             let imagesHtml = '';
             if(p.images && p.images.length > 0) {
                 imagesHtml = p.images.map(img => `<img src="${img}" class="min-w-full h-64 object-cover rounded-xl snap-center">`).join('');
@@ -131,15 +198,31 @@
                     ${(p.images && p.images.length > 1) ? `<p class="text-center text-[10px] text-gray-400 mb-3"><i class="fas fa-arrows-alt-h"></i> ተጨማሪ ፎቶ ለማየት ወደ ጎን ይስቡ</p>` : '<div class="mb-3"></div>'}
                     
                     <div class="overflow-y-auto flex-grow pb-20 no-scrollbar">
-                        <span class="inline-block bg-brown-100 text-brown-800 text-[10px] font-bold px-2 py-1 rounded-full mb-2">${p.category || 'ሌሎች'}</span>
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="inline-block bg-brown-100 text-brown-800 text-[10px] font-bold px-2 py-1 rounded-full">${p.category || 'ሌሎች'}</span>
+                            <span class="text-gray-400 text-xs"><i class="fas fa-eye"></i> ${p.views || 0} እይታ</span>
+                        </div>
                         <h2 class="text-xl font-bold text-gray-800 mb-1">${p.name}</h2>
                         <p class="text-brown-600 font-bold text-lg mb-4">${p.price} ብር</p>
+                        
+                        ${isAdmin ? `
+                        <div class="bg-gray-50 p-2 rounded-lg mb-4 border flex justify-between items-center">
+                            <button onclick="togglePin('${p.id}', ${p.isPinned || false})" class="text-sm font-bold ${p.isPinned ? 'text-blue-500' : 'text-gray-600'}">
+                                <i class="fas fa-thumbtack mr-1"></i> ${p.isPinned ? 'Pin አጥፋ' : 'Pin አድርግ'}
+                            </button>
+                            <!-- 🚨 እቃ ማጥፊያ ቁልፍ 🚨 -->
+                            <button onclick="deleteProduct('${p.id}')" class="text-sm font-bold text-red-500 hover:text-red-700">
+                                <i class="fas fa-trash-alt mr-1"></i> አጥፋ
+                            </button>
+                        </div>
+                        ` : ''}
+
                         <h3 class="font-bold text-gray-700 mb-1 text-sm border-b pb-1">መግለጫ</h3>
                         <p class="text-gray-600 text-sm whitespace-pre-line leading-relaxed">${p.description}</p>
                     </div>
                     
-                    <div class="absolute bottom-0 left-0 w-full p-4 bg-white border-t">
-                        <button onclick="tg.openTelegramLink('https://t.me/${BOT_USERNAME}?start=order_${p.id}')" class="w-full bg-brown-600 text-white font-bold py-3 rounded-xl shadow-lg">
+                    <div class="absolute bottom-0 left-0 w-full p-4 bg-white border-t flex space-x-2">
+                        <button onclick="orderProduct('${p.id}', '${p.name}', '${p.price}')" class="flex-1 bg-brown-600 text-white font-bold py-3 rounded-xl shadow-lg">
                             <i class="fas fa-shopping-cart mr-2"></i> አሁን እዘዝ
                         </button>
                     </div>
@@ -165,26 +248,32 @@
         function getProductCard(p) {
             const isFav = favorites.includes(p.id);
             const coverImage = (p.images && p.images.length > 0) ? p.images[0] : (p.image || 'https://via.placeholder.com/300');
+            const likeIcon = isFav ? '<i class="fa-solid fa-heart text-brown-600 text-lg"></i>' : '<i class="fa-regular fa-heart text-brown-600 text-lg"></i>';
             
             return `
-            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col relative overflow-hidden">
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col relative overflow-hidden cursor-pointer" onclick="openProductModal('${p.id}')">
                 <div class="relative w-full h-36">
-                    <img src="${coverImage}" class="w-full h-full object-cover" onclick="openProductModal('${p.id}')">
+                    <img src="${coverImage}" class="w-full h-full object-cover">
                     <span class="absolute top-2 left-2 bg-black/60 text-white text-[9px] px-2 py-1 rounded-full">${p.category || 'ሌሎች'}</span>
+                    ${p.isPinned ? `<span class="absolute top-2 right-2 bg-yellow-400 text-yellow-900 text-[10px] px-2 py-1 rounded-full font-bold shadow"><i class="fas fa-thumbtack"></i></span>` : ''}
                     ${(p.images && p.images.length > 1) ? `<span class="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full"><i class="far fa-images"></i> ${p.images.length}</span>` : ''}
                 </div>
-                <button onclick="toggleFavorite('${p.id}')" class="absolute top-2 right-2 bg-white/90 p-2 rounded-full shadow-sm ${isFav ? 'text-red-500' : 'text-gray-400'}">
-                    <i class="fas fa-heart"></i>
-                </button>
                 <div class="p-3 flex flex-col flex-grow">
-                    <h3 class="font-bold text-gray-800 text-sm mb-1 truncate">${p.name}</h3>
+                    <div class="flex justify-between items-start mb-1">
+                        <h3 class="font-bold text-gray-800 text-sm truncate mr-2 w-3/4">${p.name}</h3>
+                        <button onclick="toggleFavorite('${p.id}', event)" class="focus:outline-none flex flex-col items-center">
+                            ${likeIcon}
+                            <span class="text-[9px] text-gray-500 font-bold mt-0.5">${p.likes || 0}</span>
+                        </button>
+                    </div>
+                    
                     <p class="text-brown-600 font-bold text-sm mb-2">${p.price} ብር</p>
                     <div class="mt-auto space-y-2">
-                        <button onclick="openProductModal('${p.id}')" class="w-full bg-brown-600 text-white text-xs font-bold py-2 rounded-lg">
+                        <button onclick="event.stopPropagation(); orderProduct('${p.id}', '${p.name}', '${p.price}')" class="w-full bg-brown-600 text-white text-xs font-bold py-2 rounded-lg">
                             <i class="fas fa-shopping-cart mr-1"></i> እዘዝ
                         </button>
                         ${isAdmin ? `
-                        <button onclick="shareToChannel('${p.name}', '${p.price}', '${p.id}')" class="w-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold py-2 rounded-lg">
+                        <button onclick="event.stopPropagation(); shareToChannel('${p.name}', '${p.price}', '${p.id}')" class="w-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold py-2 rounded-lg">
                             <i class="fas fa-bullhorn mr-1"></i> ላክ
                         </button>
                         ` : ''}
@@ -196,7 +285,10 @@
         async function renderHome(main) {
             main.innerHTML = `<div class="text-center mt-10"><i class="fas fa-spinner fa-spin text-3xl text-brown-600"></i></div>`;
             const prods = await fetchProducts();
-            const latest = prods.slice(0, 4).map(getProductCard).join('');
+            const pinned = prods.filter(p => p.isPinned);
+            const unpinned = prods.filter(p => !p.isPinned).slice(0, 4);
+            const latest = [...pinned, ...unpinned].map(getProductCard).join('');
+            
             main.innerHTML = `
                 <div class="bg-brown-600 text-white rounded-2xl p-6 text-center shadow-lg mb-6 relative overflow-hidden">
                     <div class="absolute -right-4 -top-4 opacity-20"><i class="fas fa-shopping-bag text-8xl"></i></div>
@@ -226,7 +318,6 @@
             const prods = await fetchProducts();
             const allItems = prods.map(getProductCard).join('');
             
-            // ካተጎሪዎችን ማሳያ Chips
             const categories = ['ሁሉንም', 'ኤሌክትሮኒክስ', 'አልባሳት', 'ጫማዎች', 'የቤት እቃዎች', 'መዋቢያዎች', 'ሌሎች'];
             const catHtml = categories.map(c => 
                 `<button onclick="filterCat('${c}')" class="cat-btn ${c === window.currentCat ? 'bg-brown-600 text-white' : 'bg-white text-gray-600 border border-gray-200'} px-4 py-1.5 rounded-full text-[11px] whitespace-nowrap shadow-sm">${c}</button>`
@@ -252,8 +343,6 @@
                 });
                 document.getElementById('shopGrid').innerHTML = filtered.map(getProductCard).join('') || '<p class="col-span-2 text-center py-6 text-gray-500">የተፈለገው እቃ አልተገኘም</p>';
             });
-            
-            // የነበረበትን Category ማጣሪያ እንዲተገብር
             document.getElementById('searchInput').dispatchEvent(new Event('input'));
         }
 
@@ -263,24 +352,17 @@
                 <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100 space-y-4">
                     <div><label class="text-xs text-gray-500">የእቃው ስም</label><input type="text" id="sName" class="w-full border rounded-lg p-3 bg-gray-50"></div>
                     <div><label class="text-xs text-gray-500">ዋጋ (በብር)</label><input type="number" id="sPrice" class="w-full border rounded-lg p-3 bg-gray-50"></div>
-                    
-                    <!-- አዲሱ የ Category መምረጫ -->
                     <div>
                         <label class="text-xs text-gray-500">ምድብ (Category)</label>
                         <select id="sCat" class="w-full border rounded-lg p-3 bg-gray-50 text-gray-700 outline-none">
-                            <option value="ኤሌክትሮኒክስ">💻 ኤሌክትሮኒክስ</option>
-                            <option value="አልባሳት">👕 አልባሳት</option>
-                            <option value="ጫማዎች">👟 ጫማዎች</option>
-                            <option value="የቤት እቃዎች">🛏️ የቤት እቃዎች</option>
-                            <option value="መዋቢያዎች">💄 መዋቢያዎች</option>
-                            <option value="ሌሎች">📦 ሌሎች</option>
+                            <option value="ኤሌክትሮኒክስ">💻 ኤሌክትሮኒክስ</option><option value="አልባሳት">👕 አልባሳት</option>
+                            <option value="ጫማዎች">👟 ጫማዎች</option><option value="የቤት እቃዎች">🛏️ የቤት እቃዎች</option>
+                            <option value="መዋቢያዎች">💄 መዋቢያዎች</option><option value="ሌሎች">📦 ሌሎች</option>
                         </select>
                     </div>
-
                     <div>
                         <label class="text-xs text-gray-500">ፎቶዎች (እስከ 4 ፎቶ)</label>
                         <input type="file" id="sImages" multiple accept="image/*" class="w-full border rounded-lg p-2 bg-gray-50 text-sm">
-                        <p class="text-[10px] text-gray-400 mt-1">የመጀመሪያው ፎቶ ሽፋን (Cover) ይሆናል</p>
                     </div>
                     <div><label class="text-xs text-gray-500">መግለጫ</label><textarea id="sDesc" class="w-full border rounded-lg p-3 bg-gray-50 h-24"></textarea></div>
                     <button onclick="postItem()" class="w-full bg-brown-600 text-white font-bold py-3 rounded-lg"><i class="fas fa-upload mr-2"></i> ፖስት አድርግ</button>
@@ -291,96 +373,132 @@
         window.postItem = async () => {
             const name = document.getElementById('sName').value;
             const price = document.getElementById('sPrice').value;
-            const cat = document.getElementById('sCat').value; // ምድብ ማንበቢያ
+            const cat = document.getElementById('sCat').value;
             const files = document.getElementById('sImages').files;
             const desc = document.getElementById('sDesc').value;
-
             const IMGBB_API_KEY = "00537984db6cf1347305abf5b9d892e8"; 
 
-            if(!name || !price) return tg.showAlert("ስም እና ዋጋ ማስገባት ግዴታ ነው!");
-            if(files.length === 0) return tg.showAlert("እባክዎ ቢያንስ 1 ፎቶ ያስገቡ!");
-            if(files.length > 4) return tg.showAlert("ከ 4 ፎቶ በላይ አይፈቀድም!");
+            if(!name || !price || files.length === 0) return tg.showAlert("ስም፣ ዋጋ እና ፎቶ ግዴታ ናቸው!");
             
-            tg.MainButton.text = "ፎቶዎች አፕሎድ እየተደረጉ ነው..."; 
-            tg.MainButton.show();
-            tg.MainButton.showProgress();
-
+            tg.MainButton.text = "አፕሎድ እየተደረገ ነው..."; tg.MainButton.show(); tg.MainButton.showProgress();
             try {
                 let uploadedUrls = [];
-                for (let i = 0; i < files.length; i++) {
-                    let formData = new FormData();
-                    formData.append("image", files[i]);
-                    
-                    let response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-                        method: 'POST',
-                        body: formData
-                    });
-                    
-                    let data = await response.json();
-                    if(data.success) {
-                        uploadedUrls.push(data.data.url);
-                    } else {
-                        throw new Error("ImgBB Upload Failed");
-                    }
+                for (let i = 0; i < (files.length > 4 ? 4 : files.length); i++) {
+                    let formData = new FormData(); formData.append("image", files[i]);
+                    let res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: formData });
+                    let data = await res.json();
+                    if(data.success) uploadedUrls.push(data.data.url);
                 }
-
-                tg.MainButton.text = "ዳታቤዝ ላይ እየተመዘገበ ነው...";
-                
+                tg.MainButton.text = "እየተመዘገበ ነው...";
                 await addDoc(collection(db, "products"), {
-                    name, 
-                    price: Number(price), 
-                    category: cat, // ምድብ ዳታቤዝ ላይ መመዝገቢያ
-                    images: uploadedUrls,
-                    description: desc,
-                    sellerId: currentUser.id, 
-                    likes: 0, 
-                    createdAt: new Date()
+                    name, price: Number(price), category: cat, images: uploadedUrls, description: desc,
+                    sellerId: currentUser.id, likes: 0, views: 0, isPinned: false, createdAt: new Date()
                 });
-                
-                tg.MainButton.hide();
-                tg.showAlert("በተሳካ ሁኔታ ተለጥፏል!");
-                productsCache = []; // Reset cache
-                switchTab('home');
-            } catch(e) { 
-                console.error(e);
-                tg.MainButton.hide(); 
-                tg.showAlert("ስህተት ተፈጥሯል! ኢንተርኔትዎን ያረጋግጡ።"); 
-            }
+                tg.MainButton.hide(); tg.showAlert("በተሳካ ሁኔታ ተለጥፏል!");
+                productsCache = []; switchTab('home');
+            } catch(e) { tg.MainButton.hide(); tg.showAlert("ስህተት ተፈጥሯል!"); }
         };
 
         async function renderFavorites(main) {
             main.innerHTML = `<div class="text-center mt-10"><i class="fas fa-spinner fa-spin text-3xl text-brown-600"></i></div>`;
             const prods = await fetchProducts();
             const favItems = prods.filter(p => favorites.includes(p.id));
-            main.innerHTML = `
-                <h2 class="text-xl font-bold text-brown-900 mb-4"><i class="fas fa-heart text-red-500 mr-2"></i>የወደድኳቸው</h2>
-                <div class="grid grid-cols-2 gap-3">
-                    ${favItems.length ? favItems.map(getProductCard).join('') : '<div class="col-span-2 text-center py-10 bg-white rounded-xl"><i class="fas fa-box-open text-4xl text-gray-300 mb-2"></i><p class="text-gray-500">ምንም የለም</p></div>'}
-                </div>
-            `;
+            main.innerHTML = `<h2 class="text-xl font-bold text-brown-900 mb-4"><i class="fas fa-heart text-red-500 mr-2"></i>የወደድኳቸው</h2>
+                <div class="grid grid-cols-2 gap-3">${favItems.length ? favItems.map(getProductCard).join('') : '<div class="col-span-2 text-center py-10 bg-white rounded-xl"><i class="fas fa-box-open text-4xl text-gray-300 mb-2"></i><p class="text-gray-500">ምንም የለም</p></div>'}</div>`;
         }
 
-        function renderProfile(main) {
-            main.innerHTML = `
-                <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 text-center mb-6">
-                    <div class="w-20 h-20 bg-brown-100 rounded-full flex items-center justify-center mx-auto mb-3"><i class="fas fa-user text-3xl text-brown-600"></i></div>
-                    <h2 class="font-bold text-xl">${currentUser.first_name}</h2>
-                    <p class="text-gray-500 text-sm mb-2">ID: ${currentUser.id}</p>
-                    ${isAdmin ? `<span class="bg-yellow-400 text-brown-900 text-[10px] font-bold px-3 py-1 rounded-full">ሱቅ አስተዳዳሪ</span>` : `<span class="bg-gray-200 text-gray-600 text-[10px] px-3 py-1 rounded-full">ደንበኛ</span>`}
-                </div>
-                ${isAdmin ? `
-                <div class="grid grid-cols-2 gap-3 mb-4">
-                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 text-center">
-                        <p class="text-gray-500 text-[10px] mb-1">የእኛ እቃዎች</p>
-                        <p class="text-2xl font-bold text-brown-600">${productsCache.length}</p>
+        window.saveAdminSettings = async () => {
+            const phone = document.getElementById('adminPhone').value;
+            const telegram = document.getElementById('adminTg').value;
+            await setDoc(doc(db, 'settings', 'adminProfile'), { phone, telegram });
+            adminSettings = { phone, telegram };
+            tg.showAlert("ሴቲንግዎ ተስተካክሏል!");
+        };
+
+        window.deleteOrder = async (id) => {
+            if(confirm("ትዕዛዙን ማጥፋት ይፈልጋሉ?")) {
+                await deleteDoc(doc(db, "orders", id));
+                switchTab('profile');
+            }
+        };
+
+        async function renderProfile(main) {
+            main.innerHTML = `<div class="text-center mt-10"><i class="fas fa-spinner fa-spin text-3xl text-brown-600"></i></div>`;
+            
+            if(isAdmin) {
+                const usersSnap = await getDocs(collection(db, "users"));
+                const totalUsers = usersSnap.size;
+                
+                const prods = await fetchProducts();
+                const totalViews = prods.reduce((sum, p) => sum + (p.views || 0), 0);
+                
+                const ordersSnap = await getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc")));
+                let ordersHtml = '';
+                ordersSnap.forEach(doc => {
+                    const o = doc.data();
+                    ordersHtml += `<div class="bg-gray-50 p-3 rounded-lg border mb-2 flex justify-between items-center">
+                        <div>
+                            <p class="font-bold text-sm text-gray-800">${o.productName} (${o.price} ብር)</p>
+                            <p class="text-xs text-gray-500"><i class="fas fa-user"></i> ${o.customerName} | <i class="fas fa-phone"></i> ${o.customerPhone}</p>
+                        </div>
+                        <button onclick="deleteOrder('${doc.id}')" class="text-red-500 p-2"><i class="fas fa-trash"></i></button>
+                    </div>`;
+                });
+
+                main.innerHTML = `
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 text-center mb-4">
+                        <div class="w-16 h-16 bg-brown-100 rounded-full flex items-center justify-center mx-auto mb-2"><i class="fas fa-user-shield text-2xl text-brown-600"></i></div>
+                        <h2 class="font-bold text-xl">${currentUser.first_name}</h2>
+                        <span class="bg-yellow-400 text-brown-900 text-[10px] font-bold px-3 py-1 rounded-full">ሱቅ አስተዳዳሪ</span>
                     </div>
-                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 text-center">
-                        <p class="text-gray-500 text-[10px] mb-1">እይታዎች</p>
-                        <p class="text-2xl font-bold text-brown-600"><i class="fas fa-chart-line"></i></p>
+
+                    <div class="grid grid-cols-2 gap-3 mb-4">
+                        <div class="bg-white p-3 rounded-xl shadow-sm border border-gray-100 text-center">
+                            <p class="text-gray-500 text-[10px] mb-1">ጠቅላላ እቃዎች</p>
+                            <p class="text-xl font-bold text-brown-600">${prods.length}</p>
+                        </div>
+                        <div class="bg-white p-3 rounded-xl shadow-sm border border-gray-100 text-center">
+                            <p class="text-gray-500 text-[10px] mb-1">ጠቅላላ እይታዎች</p>
+                            <p class="text-xl font-bold text-brown-600"><i class="fas fa-eye text-sm"></i> ${totalViews}</p>
+                        </div>
+                        <div class="bg-white p-3 rounded-xl shadow-sm border border-gray-100 text-center">
+                            <p class="text-gray-500 text-[10px] mb-1">ቦት ተጠቃሚዎች</p>
+                            <p class="text-xl font-bold text-brown-600"><i class="fas fa-users text-sm"></i> ${totalUsers}</p>
+                        </div>
+                        <div class="bg-white p-3 rounded-xl shadow-sm border border-gray-100 text-center">
+                            <p class="text-gray-500 text-[10px] mb-1">አዲስ ትዕዛዞች</p>
+                            <p class="text-xl font-bold text-brown-600"><i class="fas fa-shopping-cart text-sm"></i> ${ordersSnap.size}</p>
+                        </div>
                     </div>
-                </div>
-                ` : ''}
-            `;
+
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-4">
+                        <h3 class="font-bold text-gray-800 mb-3 border-b pb-2"><i class="fas fa-cog text-gray-400 mr-2"></i>የአድሚን መቀበያ መረጃ</h3>
+                        <input type="text" id="adminPhone" placeholder="ስልክ ቁጥርዎ (ምሳሌ: 0911...)" value="${adminSettings.phone || ''}" class="w-full border rounded-lg p-2 mb-2 bg-gray-50 text-sm">
+                        <input type="text" id="adminTg" placeholder="ቴሌግራም ዩዘርኔም (ያለ @)" value="${adminSettings.telegram || ''}" class="w-full border rounded-lg p-2 mb-3 bg-gray-50 text-sm">
+                        <button onclick="saveAdminSettings()" class="w-full bg-brown-600 text-white font-bold py-2 rounded-lg text-sm">ሴቲንግ አስቀምጥ</button>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                        <h3 class="font-bold text-gray-800 mb-3 border-b pb-2"><i class="fas fa-box text-gray-400 mr-2"></i>የገቡ ትዕዛዞች</h3>
+                        ${ordersHtml || '<p class="text-sm text-gray-500 text-center py-4">ምንም ትዕዛዝ የለም</p>'}
+                    </div>
+                `;
+            } else {
+                main.innerHTML = `
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 text-center mb-6">
+                        <div class="w-20 h-20 bg-brown-100 rounded-full flex items-center justify-center mx-auto mb-3"><i class="fas fa-user text-3xl text-brown-600"></i></div>
+                        <h2 class="font-bold text-xl">${currentUser.first_name}</h2>
+                        <span class="bg-gray-200 text-gray-600 text-[10px] px-3 py-1 rounded-full">ደንበኛ</span>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center">
+                        <h3 class="font-bold text-gray-800 mb-2">ሱቁን ያነጋግሩ</h3>
+                        <p class="text-sm text-gray-500 mb-4">ጥያቄ ወይም አስተያየት ካለዎት ከታች ባለው አድራሻ ያግኙን፡</p>
+                        ${adminSettings.phone ? `<a href="tel:${adminSettings.phone}" class="block w-full bg-brown-100 text-brown-800 font-bold py-3 rounded-xl mb-3"><i class="fas fa-phone mr-2"></i> ይደውሉ (${adminSettings.phone})</a>` : ''}
+                        ${adminSettings.telegram ? `<button onclick="tg.openTelegramLink('https://t.me/${adminSettings.telegram}')" class="w-full bg-blue-100 text-blue-700 font-bold py-3 rounded-xl"><i class="fab fa-telegram mr-2"></i> በቴሌግራም ያውሩን</button>` : ''}
+                        ${(!adminSettings.phone && !adminSettings.telegram) ? '<p class="text-xs text-red-400">የአድሚን መረጃ እስካሁን አልገባም።</p>' : ''}
+                    </div>
+                `;
+            }
         }
 
         switchTab('home');
